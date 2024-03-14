@@ -1,0 +1,43 @@
+{
+    "name": "base-bailey-mysql",
+    "version": "1.0.0",
+    "description": "",
+    "main": "app.js",
+    "scripts": {
+        "prestart": "npx eslint . --no-ignore",
+        "pre-copy": "cd .. && npm run  copy.lib base-baileys-mysql",
+        "start": "node app.js"
+    },
+    "keywords": [],
+    "dependencies": {
+        "@babel/core": "^7.24.0",
+        "@bot-whatsapp/bot": "latest",
+        "@bot-whatsapp/cli": "latest",
+        "@bot-whatsapp/database": "latest",
+        "@bot-whatsapp/portal": "latest",
+        "@bot-whatsapp/provider": "latest",
+        "@whiskeysockets/baileys": "6.5.0",
+        "bard-ai": "^2.0.3",
+        "bing-chat": "^0.2.3",
+        "cache-manager": "5.2.4",
+        "consulta-dolar-venezuela": "^1.1.0",
+        "dotenv": "^16.4.5",
+        "mysql2": "^2.3.3",
+        "node-schedule": "^2.1.1",
+        "wa-sticker-formatter": "4.4.4"
+    },
+    "devDependencies": {
+        "babel-eslint": "^10.1.0",
+        "babel-preset-env": "^1.7.0",
+        "babel-preset-es2015": "^6.24.1",
+        "babel-preset-react": "^6.24.1",
+        "babel-preset-stage-0": "^6.24.1",
+        "babelify": "^10.0.0",
+        "browserify": "^17.0.0",
+        "eslint": "^8.57.0",
+        "eslint-plugin-bot-whatsapp": "latest",
+        "vue-eslint-parser": "^9.4.2"
+    },
+    "author": "",
+    "license": "ISC"
+}

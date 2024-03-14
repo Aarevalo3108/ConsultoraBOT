@@ -1,0 +1,9 @@
+/node_modules
+/bot_sessions
+.env
+core.class.log
+test.js
+queue.class.log
+package-lock.json
+bot.qr.png
+baileys.log
