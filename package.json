@@ -8,6 +8,7 @@
         "pre-copy": "cd .. && npm run  copy.lib base-baileys-mysql",
         "start": "node app.js"
     },
+    "type": "commonjs",
     "keywords": [],
     "dependencies": {
         "@babel/core": "^7.24.0",
@@ -24,6 +25,7 @@
         "dotenv": "^16.4.5",
         "mysql2": "^2.3.3",
         "node-schedule": "^2.1.1",
+        "openai": "^4.29.0",
         "wa-sticker-formatter": "4.4.4"
     },
     "devDependencies": {

@@ -1,16 +1,16 @@
 // funciones principales del bot
 const { createBot, createProvider, createFlow, addKeyword, EVENTS } = require('@bot-whatsapp/bot')
-
+const AICall = require("AICall")
 // Dependencias para el bot, proveedor (baileys) y adaptador. Asi como una funcion para mostrar el codigo QR por una pagina web
+const {createPool} = require('mysql2/promise');
 const QRPortalWeb = require('@bot-whatsapp/portal')
 const BaileysProvider = require('@bot-whatsapp/provider/baileys')
 const MySQLAdapter = require('@bot-whatsapp/database/mysql')
-const {createPool} = require('mysql2/promise');
-
 // Variables de entorno
 require('dotenv').config()
+const {regex, validator, doctorAI} = require('./constantes/constantsBOT')
 
-/**
+/**s
  * Declaramos las conexiones de MySQL
  */
 const mysqlDB = {
@@ -21,22 +21,6 @@ const mysqlDB = {
   port: process.env.PORT
 }
 const pool = createPool(mysqlDB);
-
-//  Expresiones regulares para validar cada entrada y evitar inyeccion SQL
-
-const regex = {
-  name: /^[a-zA-ZáéíóúÁÉÍÓÚñÑ]{2,32}$/,
-  ci: /^\d{8}$/,
-  tlf: /^\d{11}$/,
-  long_text: /^[a-zA-ZáéíóúÁÉÍÓÚ0-9.,\s]{20,255}$/,
-  short_text: /^[a-zA-ZáéíóúÁÉÍÓÚ0-9.,\s]{1,45}$/,
-  sex: /^[fFmM]$/,
-  schedule: /^(?:[01]\d|2[0-3]):[0-5]\d$/,
-  birth: /^(19\d\d|20[0-1]\d|202[0-4])-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/,
-  sex: /^[fFmM]$/
-}
-
-// funcion para manejar datos provenientes de la base de datos
 const manageData = async (sentence) => {
   try{
     const [result] = await pool.query(sentence);
@@ -47,6 +31,37 @@ const manageData = async (sentence) => {
   }
 }
 
+const DBValidator = async () => {
+  console.log("Comprobando base de datos...");
+  const pacientes = await manageData("SELECT diagnostico_id,sintoma,cedula FROM paciente");
+  let validacion = ''; let sentencia = '';let diagnostico='';let tratamiento='';let index = {}; let validando = false;
+  pacientes.map((info) => {
+    if(info.diagnostico_id == 1){
+      validando = true
+      return 0
+    }
+  })
+  pacientes.map(async (info) => {
+    if(info.diagnostico_id == 1){
+      validacion = await AICall(validator,info.sintoma)
+      if(validacion.trim() == "VALIDO"){
+        sentencia = await AICall(doctorAI,info.sintoma)
+        diagnostico = sentencia.split('DIAGNOSTICO: ')[1].split('TRATAMIENTO: ')[0];
+        tratamiento = sentencia.split('TRATAMIENTO: ')[1];
+        await manageData(`INSERT INTO diagnostico (descripcion,tratamiento) VALUES ('${diagnostico}','${tratamiento}');`)
+        index = await manageData(`SELECT id FROM diagnostico WHERE descripcion ='${diagnostico}' AND tratamiento ='${tratamiento}'`)
+        await manageData(`UPDATE paciente SET diagnostico_id = ${index[0].id} WHERE cedula = ${info.cedula}`)
+        console.log(`Paciente ${info.cedula} actualizado con el diagnostico: ${index[0].id}`);
+      }
+    }
+  })
+  if(validando){
+    console.log("Se esta validando la base de datos...");
+  }else{
+    console.log("Base de datos validada, no se modificaron datos.");
+  }
+}
+
 const flowTerminarChat = addKeyword("7").addAnswer(`Gracias por usar el *ChatBOT* 👋👋`)
 
 
@@ -54,16 +69,22 @@ const flowTerminarChat = addKeyword("7").addAnswer(`Gracias por usar el *ChatBOT
 const flowAgendarCita = addKeyword("6").addAnswer(
   `Ingrese el número de cédula del paciente 🧐💉`,{capture: true},
   async(ctx,{state,fallBack,flowDynamic,endFlow}) => {
-    console.log(ctx.from);
+    if(String(ctx.body).length == 7){
+      ctx.body = `0${String(ctx.body)}`;
+    }
     if(!regex.ci.test(ctx.body)){
       return fallBack();
     }
-    const sintomas = await manageData(`SELECT sintoma FROM paciente WHERE cedula=${ctx.body}`)
+    const sintomas = await manageData(`SELECT sintoma,diagnostico_id FROM paciente WHERE cedula=${ctx.body}`)
+    const diagnostico = await manageData(`SELECT descripcion,tratamiento FROM diagnostico WHERE id=${sintomas[0].diagnostico_id}`)
     if(!sintomas.length){
       return await flowDynamic('No se encuentra registrado ese numero de cedula')
     }
+    await flowDynamic(`- Sintomas del paciente son 🤧: ${sintomas[0].sintoma}
+    \n- Un posible diagnostico 🤔: ${diagnostico[0].descripcion}
+    \n- Un posible tratamiento 💊: ${diagnostico[0].tratamiento}`)
   }
-)
+).addAnswer(`¿Deseas agendar una cita? S o N`)
 
 
 // Funcion para mostrar clinicas
@@ -170,7 +191,7 @@ const flowMostrarPaciente = addKeyword("3").addAnswer(
 )
 
 // Funcion para agregar paciente
-const flowAgregarPaciente = addKeyword("1").addAnswer(
+const flowAgregarPaciente = addKeyword("1",{sensitive: true}).addAnswer(
   `- (escribe *terminar* cuando quieras para cancelar la conversación)\n\nIngrese el primer nombre del paciente:`,{capture: true},
   async (ctx,{fallBack,state,endFlow}) => {
     if(!regex.name.test(ctx.body)){
@@ -229,18 +250,24 @@ const flowAgregarPaciente = addKeyword("1").addAnswer(
     await state.update({tlf: ctx.body})
   }
 ).addAnswer(
-  `Ingrese los síntomas que presenta: `,{capture: true},
-  async (ctx,{fallBack,state,endFlow}) => {
+  `Ingrese los síntomas que presenta: (no se admiten caracteres especiales, espere un poco luego de ingresar los sintomas)`,{capture: true},
+  async (ctx,{fallBack,state,endFlow,flowDynamic}) => {
     if(!regex.long_text.test(ctx.body)){
+      await flowDynamic(`Los síntomas que ha suministrado no son válidos (sea detallado, con un texto no tan largo ni tan corto, no se admiten caracteres especiales, solo *.*, *,* y números). Por favor, ingrese de nuevo. 🤗`)
       return fallBack();
     }
     else if(ctx.body.toLowerCase() === 'terminar'){
       return endFlow('❎Conversación terminada❎')
     }
+    const validacion = await AICall(validator,ctx.body)
+    if(validacion.trim() == "NO_VALIDO"){
+      await flowDynamic(`Los sintomas que ha suministrado no son validos. Por favor, ingrese de nuevo. 🤗`)
+      return fallBack()
+    }
     await state.update({symptoms: ctx.body})
   }
 ).addAnswer(
-  `Ingrese sexo del paciente: Ejm: M o F`,{capture: true},
+  [`Sintomas validados!`,`Ingrese sexo del paciente: Ejm: M o F`],{capture: true},
   async (ctx,{fallBack,state,endFlow}) => {
     if(!regex.sex.test(ctx.body)){
       return fallBack();
@@ -267,13 +294,20 @@ const flowAgregarPaciente = addKeyword("1").addAnswer(
 ).addAnswer(`Es correcto? S o N:`,{capture: true},
   async (ctx,{fallBack,state,flowDynamic,gotoFlow}) => {
     if(String(ctx.body).toLowerCase() == 'n'){
-      await flowDynamic(`Por favor, ingrese su información nuevamente. 🤗`)
+      await flowDynamic(`Gracias, por favor, ingrese su información nuevamente. 🤗`)
       return gotoFlow(flowPrincipal)
     }
     else if(String(ctx.body).toLowerCase() == 's'){
+      await flowDynamic(`Espere un momento... ⌚`)
       const nuevoPaciente = state.getMyState()
-      await manageData(`INSERT INTO paciente (Diagnostico_id,nombre, apellido,nacimiento,cedula,telefono,sintoma,sexo) VALUES ('1','${nuevoPaciente.name}','${nuevoPaciente.last_name}','${nuevoPaciente.birth}','${nuevoPaciente.ci}','${nuevoPaciente.tlf}','${nuevoPaciente.symptoms}','${nuevoPaciente.sex}')`);
-      return await flowDynamic(`Informacion ingresada con exito!. 😎`)
+      const sentencia = await AICall(doctorAI,nuevoPaciente.symptoms)
+      const diagnostico = sentencia.split('DIAGNOSTICO: ')[1].split('TRATAMIENTO: ')[0];
+      const tratamiento = sentencia.split('TRATAMIENTO: ')[1];
+      await manageData(`INSERT INTO diagnostico (descripcion,tratamiento) VALUES ('${diagnostico}','${tratamiento}');`)
+      const index = await manageData(`SELECT id FROM diagnostico WHERE descripcion ='${diagnostico}' AND tratamiento ='${tratamiento}'`)
+      await manageData(`INSERT INTO paciente (Diagnostico_id,nombre, apellido,nacimiento,cedula,telefono,sintoma,sexo) VALUES ('${index[0].id}','${nuevoPaciente.name}','${nuevoPaciente.last_name}','${nuevoPaciente.birth}','${nuevoPaciente.ci}','${nuevoPaciente.tlf}','${nuevoPaciente.symptoms}','${nuevoPaciente.sex}')`);
+      console.log(`Paciente ${nuevoPaciente.cedula} actualizado con el diagnostico: ${index[0].id}`);
+      return await flowDynamic(`Informacion ingresada con exito!, pruebe a agendar una cita. 🤖`)
     }
     else{
       return fallBack()
@@ -290,7 +324,7 @@ const flowPrincipal = addKeyword(EVENTS.WELCOME).addAnswer(
   *3*. Mostrar pacientes. ✅
   *4*. Mostrar doctores. ✅
   *5*. Mostrar clínicas. ✅
-  *6*. Agendar cita ❌.
+  *6*. Agendar cita (en desarrollo).
   *7*. Terminar chat. ✅`
   ,null,null,[flowMostrarPaciente,flowAgregarPaciente,flowAgregarDoctor,
               flowMostrarDoctor,flowMostrarClinica,flowAgendarCita,flowTerminarChat]
@@ -299,7 +333,7 @@ const flowPrincipal = addKeyword(EVENTS.WELCOME).addAnswer(
 // Funcion principal para inicializar el bot
 const main = async () => {
   const adapterDB = new MySQLAdapter(mysqlDB)
-  const adapterFlow = createFlow([flowPrincipal])
+  const adapterFlow = createFlow([flowPrincipal,flowAgregarPaciente])
   const adapterProvider = createProvider(BaileysProvider)
   createBot({
       flow: adapterFlow,
@@ -308,5 +342,5 @@ const main = async () => {
   })
   QRPortalWeb()
 }
-
+DBValidator()
 main()
