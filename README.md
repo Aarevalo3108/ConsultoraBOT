@@ -25,7 +25,7 @@ const main = async () => {
     })
 }
 ```
-
+Pasos para instalar librerias e iniciar el bot:
 ```
 npm install
 npm start
